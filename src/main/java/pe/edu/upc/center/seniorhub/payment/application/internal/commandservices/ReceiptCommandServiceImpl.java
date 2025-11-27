@@ -7,15 +7,18 @@ import pe.edu.upc.center.seniorhub.payment.domain.model.commands.DeleteReceiptCo
 import pe.edu.upc.center.seniorhub.payment.domain.model.commands.UpdateReceiptCommand;
 import pe.edu.upc.center.seniorhub.payment.domain.services.ReceiptCommandService;
 import pe.edu.upc.center.seniorhub.payment.infrastructure.persistence.jpa.repositories.ReceiptRepository;
+import pe.edu.upc.center.seniorhub.payment.infrastructure.integration.NotificationServiceClient;
 
 import java.util.Optional;
 
 @Service
 public class ReceiptCommandServiceImpl implements ReceiptCommandService {
     private final ReceiptRepository receiptRepository;
+    private final NotificationServiceClient notificationServiceClient;
 
-    public ReceiptCommandServiceImpl(ReceiptRepository receiptRepository) {
+    public ReceiptCommandServiceImpl(ReceiptRepository receiptRepository, NotificationServiceClient notificationServiceClient) {
         this.receiptRepository = receiptRepository;
+        this.notificationServiceClient = notificationServiceClient;
     }
 
     @Override
@@ -30,6 +33,29 @@ public class ReceiptCommandServiceImpl implements ReceiptCommandService {
         } catch (Exception e) {
             throw new IllegalArgumentException("Error while saving receipt: " + e.getMessage());
         }
+
+        // Send notification about created receipt (best-effort)
+        try {
+            String message = String.format("Receipt created: total=%.2f, due=%s",
+                    command.totalAmount() != null ? command.totalAmount() : 0.0f,
+                    command.dueDate() != null ? command.dueDate().toString() : "");
+
+            // ResidentId value object - obtain numeric id for notification
+            Long residentIdValue = null;
+            if (command.residentId() != null) {
+                try {
+                    residentIdValue = command.residentId().getValue();
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (residentIdValue != null) {
+                notificationServiceClient.sendNotification(residentIdValue, message);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to send notification for receipt: " + e.getMessage());
+        }
+
         return receipt.getId();
     }
 
